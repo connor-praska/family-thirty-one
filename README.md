@@ -1,6 +1,6 @@
 # 31 — The Family Table
 
-The Family Table home page at `/` is the game collection. Thirty-One lives at `/games/31/`, with its rules and create/join forms. The home page also accepts 31 room codes. Existing `/room/<code>/` invites and create/join endpoints continue to work. Only Thirty-One is playable today; other games can be added later.
+The Family Table home page at `/` is the game collection. Thirty-One lives at `/games/31/` and four-player partnership Pinochle at `/games/pinochle/`. The home page accepts either game's room codes. Existing `/room/<code>/` invites and 31 create/join endpoints continue to work. See [PINOCHLE.md](PINOCHLE.md) for the implemented defaults, configurable house rules, and testing notes.
 
 A Django card game for 2–6 family members playing on separate devices. Private invite-only tables, session-based seats, server-owned hands and rules, three lives, knocking, instant 31, round results, and rematches. Other browsers receive updates every 1.5 seconds. No paid services or frontend build step.
 
