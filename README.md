@@ -1,5 +1,7 @@
 # 31 — The Family Table
 
+The Family Table home page at `/` is the game collection. Thirty-One lives at `/games/31/`, with its rules and create/join forms. The home page also accepts 31 room codes. Existing `/room/<code>/` invites and create/join endpoints continue to work. Only Thirty-One is playable today; other games can be added later.
+
 A Django card game for 2–6 family members playing on separate devices. Private invite-only tables, session-based seats, server-owned hands and rules, three lives, knocking, instant 31, round results, and rematches. Other browsers receive updates every 1.5 seconds. No paid services or frontend build step.
 
 Rooms include table chat and clearly marked Server game announcements. Public moves show deck/discard choices and visible cards; deck draws stay hidden. The knock button sits beneath the piles, with a persistent final-turn notice and a brief animation (disabled for reduced-motion preferences). Chat works in lobbies, during games, and between rounds, including for eliminated players. Messages are plain text, limited to 300 characters and one message per player every two seconds. The latest 80 messages are shown; storage is capped at 100 per room. Server is a reserved name. All chat is temporary along with its room on free Render. Existing rooms work with the update after running `python manage.py migrate`; no rules reset is required by the code, although a Render deployment resets its temporary database.

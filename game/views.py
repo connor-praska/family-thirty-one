@@ -15,6 +15,10 @@ def home(request):
     return render(request, 'home.html')
 
 
+def thirtyone(request):
+    return render(request, 'thirtyone.html')
+
+
 def name(request):
     value = request.POST.get('name', '').strip()
     if not 1 <= len(value) <= 24:
@@ -39,7 +43,7 @@ def create(request):
     try:
         n = name(request)
     except ValueError as e:
-        return render(request, 'home.html', {'error': str(e)}, status=400)
+        return render(request, 'thirtyone.html', {'error': str(e)}, status=400)
     code = ''.join(secrets.choice(string.ascii_uppercase.replace('O', '').replace('I', '')) for _ in range(8))
     pid = secrets.token_urlsafe(24)
     Room.objects.create(code=code, data={'phase': 'lobby', 'round': 0, 'players': [{'id': pid, 'name': n, 'lives': 3, 'hand': []}], 'message': 'The best seat is the one with family.'})
@@ -70,13 +74,13 @@ def join(request):
         remember(request, code, pid)
         return redirect('/room/' + code + '/')
     except ValueError as e:
-        return render(request, 'home.html', {'error': str(e), 'code': code}, status=400)
+        return render(request, 'thirtyone.html', {'error': str(e), 'code': code}, status=400)
 
 
 def room(request, code):
     r = get_object_or_404(Room, code=code)
     if not player(request, code):
-        return render(request, 'home.html', {'code': code})
+        return render(request, 'thirtyone.html', {'code': code})
     return render(request, 'room.html', {'code': r.code})
 
 

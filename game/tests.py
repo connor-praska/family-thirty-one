@@ -93,6 +93,23 @@ class RoomTests(TestCase):
         version = client.get(self.base + 'state/').json()['version']
         return client.post(self.base + 'action/', {'action': action, 'version': version, **kwargs}, content_type='application/json')
 
+    def test_collection_to_game_and_existing_invites(self):
+        home = self.host.get('/')
+        self.assertTemplateUsed(home, 'home.html')
+        self.assertContains(home, 'href="/games/31/"')
+        game = self.host.get('/games/31/')
+        self.assertTemplateUsed(game, 'thirtyone.html')
+        self.assertContains(game, 'action="/create/"')
+        invited = Client().get(self.base)
+        self.assertTemplateUsed(invited, 'thirtyone.html')
+        self.assertContains(invited, self.code)
+        self.assertContains(invited, 'action="/join/"')
+        invalid = Client().post('/join/', {'name': 'New player', 'code': 'BADCODE'})
+        self.assertTemplateUsed(invalid, 'thirtyone.html')
+        self.assertContains(invalid, 'That table was not found.', status_code=400)
+        self.assertEqual(self.move(self.host, 'start').status_code, 200)
+        self.assertEqual(self.host.get(self.base).status_code, 200)
+
     def test_private_hands_and_reconnect(self):
         self.assertEqual(self.move(self.host, 'start').status_code, 200)
         s = self.guest.get(self.base + 'state/').json()
