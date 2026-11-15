@@ -1,11 +1,13 @@
 import json
 import secrets
 import string
+from datetime import timedelta
 from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
-from .models import Room
+from django.utils import timezone
+from .models import Room, RoomMessage
 from .engine import play, score
 
 
@@ -17,6 +19,8 @@ def name(request):
     value = request.POST.get('name', '').strip()
     if not 1 <= len(value) <= 24:
         raise ValueError('Enter a name between 1 and 24 characters.')
+    if value.casefold() == 'server':
+        raise ValueError('Server is reserved for game announcements. Choose another name.')
     return value
 
 
@@ -84,9 +88,43 @@ def state(request, code):
     g = r.data
     players = [{'name': p['name'], 'lives': p['lives'], 'you': p['id'] == pid, 'host': i == 0, 'turn': p['id'] == g.get('turn'), 'knocked': p['id'] == g.get('knocked'), 'hand': p['hand'] if p['id'] == pid else []} for i, p in enumerate(g['players'])]
     hand = next(p['hand'] for p in players if p['you'])
-    response = JsonResponse({'version': r.version, 'phase': g['phase'], 'round': g['round'], 'players': players, 'your_turn': g.get('turn') == pid, 'drawn': g.get('drawn', False), 'knocked': bool(g.get('knocked')), 'top': g.get('discard', [None])[-1] if g.get('discard') else None, 'deck_count': len(g.get('deck', [])), 'message': g['message'], 'score': score(hand) if hand else 0, 'result': g.get('result', [])})
+    payload = {'version': r.version, 'phase': g['phase'], 'round': g['round'], 'players': players, 'your_turn': g.get('turn') == pid, 'drawn': g.get('drawn', False), 'knocked': bool(g.get('knocked')), 'top': g.get('discard', [None])[-1] if g.get('discard') else None, 'deck_count': len(g.get('deck', [])), 'message': g['message'], 'score': score(hand) if hand else 0, 'result': g.get('result', [])}
+    payload['last_move'] = g.get('last_move', '')
+    payload['knock_notice'] = (next(p['name'] for p in g['players'] if p['id'] == g['knocked']) + ' knocked. '
+                               + (f"{len(g.get('remaining', []))} final turn(s) remaining." if g['phase'] == 'playing' else 'The round is over.')) if g.get('knocked') else ''
+    payload['knock_key'] = f"{g.get('round', 0)}:{g.get('knocked')}" if g.get('knocked') else ''
+    payload['messages'] = list(reversed(list(r.messages.order_by('-id').values('id', 'kind', 'author', 'text')[:80])))
+    response = JsonResponse(payload)
     response['Cache-Control'] = 'no-store'
     return response
+
+
+def trim_messages(room):
+    cutoff = list(room.messages.order_by('-id').values_list('id', flat=True)[99:100])
+    if cutoff:
+        room.messages.filter(id__lt=cutoff[0]).delete()
+
+
+@require_POST
+def chat(request, code):
+    r = get_object_or_404(Room, code=code)
+    pid = player(request, code)
+    member = next((p for p in r.data['players'] if p['id'] == pid), None)
+    if not member:
+        return JsonResponse({'error': 'Join this table first.'}, status=403)
+    try:
+        body = json.loads(request.body)
+        message = body.get('text') if isinstance(body, dict) else None
+        if not isinstance(message, str) or not 1 <= len(message.strip()) <= 300:
+            raise ValueError('Enter a message between 1 and 300 characters.')
+        with transaction.atomic():
+            if r.messages.filter(kind='chat', player_id=pid, created_at__gt=timezone.now() - timedelta(seconds=2)).exists():
+                return JsonResponse({'error': 'Give everyone a moment—try again in two seconds.'}, status=429)
+            RoomMessage.objects.create(room=r, author=member['name'], player_id=pid, text=message.strip())
+            trim_messages(r)
+        return JsonResponse({'ok': True})
+    except (ValueError, TypeError) as e:
+        return JsonResponse({'error': str(e)}, status=400)
 
 
 @require_POST
@@ -105,6 +143,10 @@ def action(request, code):
             play(r.data, pid, body.get('action'), body.get('index'))
             if not Room.objects.filter(pk=r.pk, version=r.version).update(data=r.data, version=r.version + 1):
                 raise ValueError('The table changed. Please try again.')
+            RoomMessage.objects.create(room=r, kind='event', author='Server', text=r.data.get('last_move', 'The table changed.'))
+            if r.data['phase'] in ('round_over', 'finished'):
+                RoomMessage.objects.create(room=r, kind='event', author='Server', text=r.data['message'])
+            trim_messages(r)
         return JsonResponse({'ok': True})
     except (ValueError, TypeError) as e:
         return JsonResponse({'error': str(e)}, status=400)

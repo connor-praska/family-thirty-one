@@ -4,6 +4,10 @@ import secrets
 SUITS = 'SHDC'
 
 
+def public_card(card):
+    return card[:-1] + {'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣'}[card[-1]]
+
+
 def score(hand):
     return max(sum(11 if c[:-1] == 'A' else 10 if c[:-1] in ('J', 'Q', 'K') else int(c[:-1]) for c in hand if c[-1] == suit) for suit in SUITS)
 
@@ -27,6 +31,7 @@ def deal(g):
     players = active(g)
     g['turn'] = players[(g['round'] - 1) % len(players)]['id']
     g['message'] = 'A new round. Make yourself at home.'
+    g['last_move'] = f"Round {g['round']} was dealt."
     if any(score(p['hand']) == 31 for p in players):
         finish(g, True)
 
@@ -71,13 +76,19 @@ def play(g, pid, verb, index=None):
         source = g['deck'] if verb == 'deck' else g['discard']
         if not source:
             raise ValueError('That pile is empty. Draw from the other pile.')
-        p['hand'].append(source.pop())
+        picked = source.pop()
+        p['hand'].append(picked)
+        g['turn_draw'] = (p['name'] + ' drew a card from the deck' if verb == 'deck'
+                          else p['name'] + ' picked up ' + public_card(picked) + ' from the discard pile')
+        g['last_move'] = g['turn_draw'] + '.'
         g['drawn'] = True
         return
     if verb == 'discard':
         if not g['drawn'] or type(index) is not int or not 0 <= index < 4:
             raise ValueError('Draw, then choose a card from your hand.')
-        g['discard'].append(p['hand'].pop(index))
+        discarded = p['hand'].pop(index)
+        g['discard'].append(discarded)
+        g['last_move'] = g.get('turn_draw', p['name'] + ' drew a card') + ' and discarded ' + public_card(discarded) + '.'
         g['drawn'] = False
         if score(p['hand']) == 31:
             finish(g, True)
@@ -93,6 +104,7 @@ def play(g, pid, verb, index=None):
         g['knocked'] = pid
         g['remaining'] = [x['id'] for x in active(g) if x['id'] != pid]
         g['message'] = p['name'] + ' knocked. Everyone else gets one final turn.'
+        g['last_move'] = g['message']
     else:
         raise ValueError('Unknown action.')
     g['turn'] = next_player(g, pid)

@@ -1,6 +1,6 @@
 from django.test import TestCase, Client, override_settings
 from .engine import score, play, deal
-from .models import Room
+from .models import Room, RoomMessage
 
 
 class RulesTests(TestCase):
@@ -59,6 +59,26 @@ class RulesTests(TestCase):
         self.assertEqual(len(cards), 52)
         self.assertEqual(len(set(cards)), 52)
 
+    def test_public_moves_and_knock_reset(self):
+        g = self.game()
+        deal(g)
+        g.update(phase='playing', turn='0', deck=['AS'], discard=['7H'])
+        g['players'][0]['hand'] = ['2C', '3D', '4H']
+        play(g, '0', 'deck')
+        self.assertEqual(g['last_move'], '0 drew a card from the deck.')
+        self.assertNotIn('A♠', g['last_move'])
+        play(g, '0', 'discard', 0)
+        self.assertEqual(g['last_move'], '0 drew a card from the deck and discarded 2♣.')
+        play(g, '1', 'pile')
+        self.assertEqual(g['last_move'], '1 picked up 2♣ from the discard pile.')
+        play(g, '1', 'discard', 3)
+        play(g, '2', 'knock')
+        self.assertIn('2 knocked', g['last_move'])
+        self.assertEqual(g['remaining'], ['0', '1'])
+        deal(g)
+        self.assertIsNone(g['knocked'])
+        self.assertEqual(g['last_move'], 'Round 2 was dealt.')
+
 
 class RoomTests(TestCase):
     def setUp(self):
@@ -97,6 +117,46 @@ class RoomTests(TestCase):
     def test_csrf_is_required(self):
         response = Client(enforce_csrf_checks=True).post('/create/', {'name': 'Someone'})
         self.assertEqual(response.status_code, 403)
+
+    def test_chat_membership_validation_and_game_version(self):
+        url = self.base + 'chat/'
+        self.assertEqual(Client().post(url, {'text': 'Hello'}, content_type='application/json').status_code, 403)
+        for text in ['', '   ', 'a' * 301, 123]:
+            self.assertEqual(self.host.post(url, {'text': text}, content_type='application/json').status_code, 400)
+        before = self.host.get(self.base + 'state/').json()['version']
+        self.assertEqual(self.host.post(url, {'text': '<b>Hello!</b>', 'author': 'Server', 'kind': 'event'}, content_type='application/json').status_code, 200)
+        state = self.guest.get(self.base + 'state/').json()
+        self.assertEqual(state['version'], before)
+        message = state['messages'][-1]
+        self.assertEqual((message['author'], message['kind'], message['text']), ('Host', 'chat', '<b>Hello!</b>'))
+        self.assertNotIn('player_id', message)
+        self.assertEqual(self.host.post(url, {'text': 'Again'}, content_type='application/json').status_code, 429)
+        self.assertEqual(self.move(self.host, 'start').status_code, 200)
+
+    def test_events_are_public_and_history_is_bounded(self):
+        self.move(self.host, 'start')
+        r = Room.objects.get(pk=self.room.pk)
+        r.data.update(phase='playing', turn=r.data['players'][0]['id'], deck=['AS'], discard=['7H'])
+        r.data['players'][0]['hand'] = ['2C', '3D', '4H']
+        r.save()
+        self.move(self.host, 'deck')
+        state = self.guest.get(self.base + 'state/').json()
+        self.assertEqual(state['messages'][-1]['text'], 'Host drew a card from the deck.')
+        self.assertEqual(state['messages'][-1]['kind'], 'event')
+        self.move(self.host, 'discard', index=0)
+        self.move(self.guest, 'knock')
+        state = self.host.get(self.base + 'state/').json()
+        self.assertIn('Grandma knocked', state['knock_notice'])
+        self.assertTrue(state['knock_key'])
+        RoomMessage.objects.bulk_create([RoomMessage(room=r, author='Host', text='hello') for _ in range(110)])
+        self.guest.post(self.base + 'chat/', {'text': 'Next game?'}, content_type='application/json')
+        self.assertEqual(r.messages.count(), 100)
+        self.assertEqual(len(self.host.get(self.base + 'state/').json()['messages']), 80)
+
+    def test_server_name_is_reserved(self):
+        for name in ['Server', ' server ', 'SERVER']:
+            self.assertEqual(Client().post('/create/', {'name': name}).status_code, 400)
+            self.assertEqual(Client().post('/join/', {'name': name, 'code': self.code}).status_code, 400)
 
     @override_settings(ALLOWED_HOSTS=['family.onrender.com'], CSRF_TRUSTED_ORIGINS=['https://family.onrender.com'])
     def test_https_origin_through_hosting_proxy(self):
